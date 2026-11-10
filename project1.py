@@ -59,8 +59,8 @@ def calc_delta(PCB):
         start = contact_pair[0]
         start = (start[0],start[1],start[2])
 
-        delta_plus[end].append(start) # fix
-        delta_plus[start].append(end)
+        delta_plus[end].append(start)
+        delta_minus[start].append(end)
 
     return delta_plus, delta_minus
 

@@ -102,11 +102,14 @@ def calculate_subgradient(routes,width,height):
 
     return search_direction
 
-def cutting_routes(routes,k):
-    feasable_routes = []
+def heuristic_cut_first_intersection(routes,k):
+    '''
+        Brief: The naivest heuristic, remove a route if it intersects any other set and repeat till no intersections
+    '''
+    feasible_routes = []
     for i in range(k):
         if routes[i] is None:
-            feasable_routes.append(None)
+            feasible_routes.append(None)
         else:
             for j in range(i+1,k):
                 if routes[j] is None:
@@ -117,12 +120,73 @@ def cutting_routes(routes,k):
                     if if_cut > 0:
                         break
             if if_cut > 0:
-                feasable_routes.append(None)
+                feasible_routes.append(None)
             else:
-                feasable_routes.append(routes[i])
-    return feasable_routes
+                feasible_routes.append(routes[i])
+    return feasible_routes
 
-def update_u(u,routes,width,height,theta, feasable_solution):
+def heuristic_cut_largest_intersection(routes,k):
+    '''
+        Brief: Less naive heuristic, find all intersections and remove the route with the most.
+
+        Note: The optimal problem of finding the maximal independent subset is NP-hard so this is only an approximate best subset to remove
+    '''
+    intersections_where  = np.zeros((k,k))
+    intersections_number = np.zeros(k)
+
+    # Which routes do we have?
+    index_list = []
+    for l in range(k):
+        if routes[l] is not None:
+            index_list.append(l)
+
+    #For all routes we have find which intersects which?
+    for i in index_list:
+        for j in index_list: 
+            if i < j:
+                intersections_ij = len(list(set(routes[i]).intersection(routes[j])))
+
+                if intersections_ij > 0:
+                    intersections_where[i,j] += 1
+                    intersections_where[j,i] += 1
+
+                    intersections_number[i] += 1
+                    intersections_number[j] += 1
+
+    # While we have intersections, remove the one with the most itnersections
+    max_intersections_index = np.argmax(intersections_number)
+    while intersections_number[max_intersections_index] > 0:
+
+        for i in index_list:
+            if intersections_where[max_intersections_index, i] > 0:
+                intersections_number[i] -= 1
+
+                intersections_where[max_intersections_index, i] = 0
+                intersections_where[i, max_intersections_index] = 0
+        
+        intersections_number[max_intersections_index] = 0
+        index_list.remove(max_intersections_index)
+        
+        max_intersections_index = np.argmax(intersections_number)
+
+    #Create the set of feasible routes from the indexes left.
+    feasible_routes = []
+    for i in range(k):
+        if i in index_list:
+            feasible_routes.append(routes[i])
+        else:
+            feasible_routes.append(None)
+        
+    return feasible_routes
+
+
+def update_u(u,routes,width,height,theta,feasible_primal_solution):
+    '''
+        Brief: Update u one step using calculate_subgradient() based on Polyak step length with a feasible primal solution
+    
+    '''
+
+    #Find seach direction
     search_direction = calculate_subgradient(routes,width,height)
 
     # Perform projection, if u_i = 0 project search direction onto the positive real line
@@ -133,18 +197,14 @@ def update_u(u,routes,width,height,theta, feasable_solution):
                 if ((u[(x,y,z)] < tol) and (search_direction[(x,y,z)] > 0)):
                     search_direction[(x,y,z)] =  0
 
-    #Polyak step length
-    lower_bound_h = feasable_solution #Q? Bad lower boudn but should always be the case
+    #Polyak step length, using 
+    lower_bound_h = feasible_primal_solution
     hu_t = h(u, routes)
     alpha_t = theta * (hu_t - lower_bound_h)/np.sum(search_direction*search_direction)      # Denominator se 5.2 b
 
     #Half step and then positive projection again
-    u_updated =  u - alpha_t*search_direction
-    for x in range(width):
-        for y in range(height):
-            for z in range(2):
-                if u_updated [(x,y,z)] <= 0:
-                    u_updated [(x,y,z)] =  0
+    u_halfstep =  u - alpha_t*search_direction
+    u_updated = np.maximum(u_halfstep, 0)
 
     return u_updated, hu_t
     
@@ -154,46 +214,63 @@ def subgradient_algorithm(instance_name, max_iter=1000):
     Brief: full subgradient algorithm
 
     '''
+
+    # Load the PCB we wish to calculate from
     PCB = load_instance("instances/"+instance_name)
+    
+    #Define basic variables and copydown attributes for cleaner notation
     width = PCB.width
     height = PCB.height
     contact_pairs = PCB.contact_pairs
     k = contact_pairs.shape[0]
 
-    delta_plus, delta_minus = calc_delta(PCB)
+    #delta_plus, delta_minus = calc_delta(PCB)
 
-    #x = [np.zeros((width, height, 2)) for _ in range(k)]
-
-
+    # Initial u and theta values
     u = np.ones((width, height, 2))/100
     theta = 1.9
-    best_feasable_solution = 0
-    best_feasable_routes = []
-    for i in range(max_iter):
-        
+
+    # Save best feasible 
+    best_feasible_primal_solution = 0
+    best_feasible_routes   = []
+    best_infeasible_routes = []
+
+    # Main loop over some max iterations
+    for t in range(max_iter):
+        #Find routes using given mathod
         routes_t  = cheapest_grid_routes(width, height, u, contact_pairs)
-        feasable_routes_t = cutting_routes(routes_t,k)
-        feasable_solution_t = len([route for route in feasable_routes_t if route is not None])
-        if feasable_solution_t > best_feasable_solution:
-            best_feasable_solution = feasable_solution_t
-            best_feasable_routes = feasable_routes_t
-            best_dualsol_routes = routes_t
 
-        u, bound_for_primal_t = update_u(u,routes_t,width,height,theta,best_feasable_solution)
+        # Using heuristic to find feasible route with corresponding primal solution (number of connected contact pairs)
+        feasible_routes_t = heuristic_cut_largest_intersection(routes_t,k)
+        feasible_primal_solution_t = len([route for route in feasible_routes_t if route is not None])
 
+        #If we get a better primal solution, update the current best set of solutions
+        if feasible_primal_solution_t > best_feasible_primal_solution:
+            best_feasible_primal_solution = feasible_primal_solution_t
+            best_feasible_routes          = feasible_routes_t
+            best_infeasible_routes        = routes_t
 
-        #if bound_for_primal_t < k - 1e-9:
-         #   break
-        if (i + 1) % 10 == 0:
+        #Update u
+        u, hu_t = update_u(u,routes_t,width,height,theta,best_feasible_primal_solution)
+            
+        #Print progress and decrese theta
+        if (t + 1) % 10 == 0:
             theta *= 0.95
             print(
-                f"Iteration {i}: "
-                f"h(u) = {bound_for_primal_t:.6f}, "
-                f"hbar = {best_feasable_solution:.6f}"
+                f"Iteration {t}: "
+                f"h(u) = {hu_t:.6f}, "
+                f"hbar = {best_feasible_primal_solution:.6f}"
             )
-    plot_grid_routes(width,height,best_feasable_routes,dual_values=u)
+
+        # Duality gap is less than 1, the best feasible primal has been achieved (since it is an integer)
+        if hu_t - best_feasible_primal_solution < 1:
+            break
+
+        
+        
+    plot_grid_routes(width,height,best_feasible_routes,dual_values=u)
     plt.show()
-    plot_grid_routes(width,height,best_dualsol_routes,dual_values=u)
+    plot_grid_routes(width,height,best_infeasible_routes,dual_values=u)
     plt.show()
     return 0
 

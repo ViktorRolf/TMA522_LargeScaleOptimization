@@ -102,8 +102,27 @@ def calculate_subgradient(routes,width,height):
 
     return search_direction
 
+def cutting_routes(routes,k):
+    feasable_routes = []
+    for i in range(k):
+        if routes[i] is None:
+            feasable_routes.append(None)
+        else:
+            for j in range(i+1,k):
+                if routes[j] is None:
+                    if_cut = 0
+                    pass
+                else:
+                    if_cut = len(list(set(routes[i]).intersection(routes[j])))
+                    if if_cut > 0:
+                        break
+            if if_cut > 0:
+                feasable_routes.append(None)
+            else:
+                feasable_routes.append(routes[i])
+    return feasable_routes
 
-def update_u(u,routes,k,width,height,theta):
+def update_u(u,routes,width,height,theta, feasable_solution):
     search_direction = calculate_subgradient(routes,width,height)
 
     # Perform projection, if u_i = 0 project search direction onto the positive real line
@@ -115,7 +134,7 @@ def update_u(u,routes,k,width,height,theta):
                     search_direction[(x,y,z)] =  0
 
     #Polyak step length
-    lower_bound_h = 6.2 #Q? Bad lower boudn but should always be the case
+    lower_bound_h = feasable_solution #Q? Bad lower boudn but should always be the case
     hu_t = h(u, routes)
     alpha_t = theta * (hu_t - lower_bound_h)/np.sum(search_direction*search_direction)      # Denominator se 5.2 b
 
@@ -148,11 +167,19 @@ def subgradient_algorithm(instance_name, max_iter=1000):
 
     u = np.ones((width, height, 2))/100
     theta = 1.9
+    best_feasable_solution = 0
+    best_feasable_routes = []
     for i in range(max_iter):
         
-        routes  = cheapest_grid_routes(width, height, u, contact_pairs)
+        routes_t  = cheapest_grid_routes(width, height, u, contact_pairs)
+        feasable_routes_t = cutting_routes(routes_t,k)
+        feasable_solution_t = len([route for route in feasable_routes_t if route is not None])
+        if feasable_solution_t > best_feasable_solution:
+            best_feasable_solution = feasable_solution_t
+            best_feasable_routes = feasable_routes_t
+            best_dualsol_routes = routes_t
 
-        u, bound_for_primal_t = update_u(u,routes,k,width,height,theta,)
+        u, bound_for_primal_t = update_u(u,routes_t,width,height,theta,best_feasable_solution)
 
 
         #if bound_for_primal_t < k - 1e-9:
@@ -162,15 +189,17 @@ def subgradient_algorithm(instance_name, max_iter=1000):
             print(
                 f"Iteration {i}: "
                 f"h(u) = {bound_for_primal_t:.6f}, "
-                f"u_max = {np.max(u):.6f}"
+                f"hbar = {best_feasable_solution:.6f}"
             )
-    plot_grid_routes(width,height,routes,dual_values=u)
+    plot_grid_routes(width,height,best_feasable_routes,dual_values=u)
+    plt.show()
+    plot_grid_routes(width,height,best_dualsol_routes,dual_values=u)
     plt.show()
     return 0
 
-iters = 1000
-subgradient_algorithm("VLSI_8_6_7.json",iters)
-#subgradient_algorithm("VLSI_35_12_18.json",iters)
+iters = 2000
+#subgradient_algorithm("VLSI_8_6_7.json",iters)
+subgradient_algorithm("VLSI_30_10_15.json",iters)
 
 
 '''

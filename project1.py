@@ -59,7 +59,7 @@ def calc_delta(PCB):
         start = contact_pair[0]
         start = (start[0],start[1],start[2])
 
-        delta_plus[end].append(start)
+        #delta_plus[end].append(start)
         delta_minus[start].append(end)
 
     return delta_plus, delta_minus
@@ -153,7 +153,7 @@ def heuristic_cut_largest_intersection(routes,k):
                     intersections_number[i] += 1
                     intersections_number[j] += 1
 
-    # While we have intersections, remove the one with the most itnersections
+    # While we have intersections, remove the one with the most intersections
     max_intersections_index = np.argmax(intersections_number)
     while intersections_number[max_intersections_index] > 0:
 
@@ -178,6 +178,62 @@ def heuristic_cut_largest_intersection(routes,k):
             feasible_routes.append(None)
         
     return feasible_routes
+
+def heuristic_cut_and_add(routes,k, contact_pairs, delta_plus, delta_minus):
+    routes = heuristic_cut_largest_intersection(routes,k)
+    used_nodes = set()
+    contact_pairs_without_route = []
+
+    for i in range(k):
+        if routes[i] is None:
+            contact_pairs_without_route.append(i)
+        else:
+            used_nodes = used_nodes | set(routes[i])
+
+
+    
+    def graph_search_helper(current_route):
+        #print("test")
+        nodes_to_search = set(delta_plus[current_route[-1]]) - visited_nodes_this_contact_pair
+    
+        if not nodes_to_search:
+            # Set empty, nothing further to search
+            return None
+        elif end_node in nodes_to_search:
+            # Found a route
+            return current_route+[end_node]
+        else:
+            # No stopping condition found, continue searching (depth first)
+            best_route_length = 100000
+            best_route = None
+            for node in nodes_to_search:
+                visited_nodes_this_contact_pair.add(node)
+                possible_route = graph_search_helper(current_route+[node])
+
+                if possible_route is not None and len(possible_route) < best_route_length:
+                    best_route = possible_route
+
+            # return the best route (or None fi no route was found)
+            return best_route
+    
+
+
+
+    for i in contact_pairs_without_route:
+        visited_nodes_this_contact_pair = used_nodes.copy()
+        start_node = tuple(contact_pairs[i][0])
+        end_node   = tuple(contact_pairs[i][1])
+
+        visited_nodes_this_contact_pair.add(start_node)
+        possible_route = graph_search_helper([start_node])
+        
+
+        if possible_route is not None:
+            routes[i] = possible_route
+            used_nodes = used_nodes | set(routes[i])
+
+    return routes
+
 
 
 def update_u(u,routes,width,height,theta,feasible_primal_solution):
@@ -224,7 +280,7 @@ def subgradient_algorithm(instance_name, max_iter=1000):
     contact_pairs = PCB.contact_pairs
     k = contact_pairs.shape[0]
 
-    #delta_plus, delta_minus = calc_delta(PCB)
+    delta_plus, delta_minus = calc_delta(PCB)
 
     # Initial u and theta values
     u = np.ones((width, height, 2))/100
@@ -241,7 +297,8 @@ def subgradient_algorithm(instance_name, max_iter=1000):
         routes_t  = cheapest_grid_routes(width, height, u, contact_pairs)
 
         # Using heuristic to find feasible route with corresponding primal solution (number of connected contact pairs)
-        feasible_routes_t = heuristic_cut_largest_intersection(routes_t,k)
+        #feasible_routes_t = heuristic_cut_largest_intersection(routes_t,k)
+        feasible_routes_t = heuristic_cut_and_add(routes_t,k,contact_pairs, delta_plus, delta_minus)
         feasible_primal_solution_t = len([route for route in feasible_routes_t if route is not None])
 
         #If we get a better primal solution, update the current best set of solutions
@@ -262,9 +319,9 @@ def subgradient_algorithm(instance_name, max_iter=1000):
                 f"hbar = {best_feasible_primal_solution:.6f}"
             )
 
-        # Duality gap is less than 1, the best feasible primal has been achieved (since it is an integer)
-        if hu_t - best_feasible_primal_solution < 1:
-            break
+            # Duality gap is less than 1, the best feasible primal has been achieved (since it is an integer)
+            if hu_t - best_feasible_primal_solution < 1:
+                break
 
         
         
@@ -274,13 +331,11 @@ def subgradient_algorithm(instance_name, max_iter=1000):
     plt.show()
     return 0
 
-iters = 2000
+iters = 10000
 #subgradient_algorithm("VLSI_8_6_7.json",iters)
-subgradient_algorithm("VLSI_30_10_15.json",iters)
+#subgradient_algorithm("VLSI_30_10_15.json",iters)
+subgradient_algorithm("VLSI_30_11_15.json",iters)
+#subgradient_algorithm("VLSI_30_10_15.json",iters)
+#subgradient_algorithm("VLSI_30_10_15.json",iters)
 
 
-'''
-Remains: 
-    Polyak step length setting lower_bound_h approprietly
-    Should return best 'bound_for_primal_t' not last bound
-'''

@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def calc_delta(PCB):
+def calc_delta(PCB: RoutingInstance):
     '''
     Brief: Calculates delta plus and delta minus for all nodes.
 
@@ -14,9 +14,11 @@ def calc_delta(PCB):
         RoutingInstance PCB
 
     Returns:
-        dictionary(tuples | list[tuples]) delta_plus, delta_minus
+        dictionary(tuples -> list[tuples]) delta_plus, delta_minus : Essentially 'lookup' table for which nodes are reachable from current node.
 
     '''
+    #NOTE: For this function, some things are superflous and we could get by with less, we do this for rigor as it doesn't impact performence a lot anyway
+
     delta_plus  = dict()
     delta_minus = dict()
 
@@ -59,52 +61,22 @@ def calc_delta(PCB):
         start = contact_pair[0]
         start = (start[0],start[1],start[2])
 
-        #delta_plus[end].append(start)
-        delta_minus[start].append(end)
+        #delta_plus[end].append(start)     #REMOVED, while not correct in the mathematical sense we don't want graphs between contact pairs to find ways 'across' this imagined line.
+        #delta_minus[start].append(end)
 
     return delta_plus, delta_minus
 
 
-def h(u, routes):
-    '''
-        Brief: Calculate h(u) given the solution to the Lagrangean subproblems for each l=0..k
-    '''
-    
-    subproblem_sum = 0
-    for route_k in routes: # For each k the only x's set to 1 are the ones in the route, all other are zero
-
-        if route_k is None: #If no route for this l exist this term is zero
-            continue
-        
-        subproblem_sum +=  1 # Q? Is it always route xor no rote
-        for vertex_i in route_k:
-            subproblem_sum -= u[vertex_i]*1
-
-        #print(route_k)  
-    #print(np.sum(u) + subproblem_sum)
-
-    return np.sum(u) + subproblem_sum
-
-
-def calculate_subgradient(routes,width,height):
-    '''
-    Brief: Calculate subgradient at step t
-    '''
-    search_direction = np.ones((width, height, 2))
-
-    for route_k in routes: # For each k the only x's set to 1 are the ones in the route, all other are zero
-    
-            if route_k is None: #If no route for this l exist this term is zero
-                continue
-    
-            for vertex_i in route_k:
-                search_direction[vertex_i] -= 1
-
-    return search_direction
-
 def heuristic_cut_first_intersection(routes,k):
     '''
-        Brief: The naivest heuristic, remove a route if it intersects any other set and repeat till no intersections
+    Brief: The naivest heuristic, remove a route if it intersects any other set and repeat till no intersections
+
+    Parameters: 
+        list[list[tuples] | None] routes : List of routes found in the subproblem. 
+        int k : Number of contact pairs (length of routes)
+        
+    Returns:
+        list[list[tuples] | None] feasible_routes : A list of feasable routes, produced from routes         
     '''
     feasible_routes = []
     for i in range(k):
@@ -125,12 +97,20 @@ def heuristic_cut_first_intersection(routes,k):
                 feasible_routes.append(routes[i])
     return feasible_routes
 
+
 def heuristic_cut_largest_intersection(routes,k):
     '''
-        Brief: Less naive heuristic, find all intersections and remove the route with the most.
-
-        Note: The optimal problem of finding the maximal independent subset is NP-hard so this is only an approximate best subset to remove
+    Brief: Less naive heuristic, find all intersections and remove the route with the most.
+        
+    Parameters: 
+        list[list[tuples] | None] routes : List of routes found in the subproblem. 
+        int k : Number of contact pairs (length of routes)
+        
+    Returns:
+        list[list[tuples] | None] feasible_routes : A list of feasable routes, produced from routes     
+        
     '''
+    #NOTE: The optimal problem of finding the maximal independent subset is NP-hard so this is only an approximate best subset to remove
     intersections_where  = np.zeros((k,k))
     intersections_number = np.zeros(k)
 
@@ -179,11 +159,26 @@ def heuristic_cut_largest_intersection(routes,k):
         
     return feasible_routes
 
-def heuristic_cut_and_add(routes,k, contact_pairs, delta_plus, delta_minus):
+
+def heuristic_cut_and_add(routes,k, contact_pairs, delta_plus):
+    '''
+        Brief: Best heuristic we found, remove intersecting routes using 'heuristic_cut_largest_intersection' then using graph search add in more routes on unused contact pairs.
+        
+        Parameters: 
+            list[list[tuples] | None] routes : List of routes found in the subproblem. 
+            int k : Number of contact pairs (length of routes)
+            dictionary(tuples -> list[tuples]) delta_plus : Lookup table to check where we have connections between nodes
+        
+        Returns:
+            list[list[tuples] | None] feasible_routes : A list of feasable routes, produced from routes     
+        
+    '''
+    # Make the solutio nfeasable through removing routes
     routes = heuristic_cut_largest_intersection(routes,k)
+
+    # Find out where we should search for new routes (for which contact pairs) and gather all used nodes in a set.
     used_nodes = set()
     contact_pairs_without_route = []
-
     for i in range(k):
         if routes[i] is None:
             contact_pairs_without_route.append(i)
@@ -191,9 +186,9 @@ def heuristic_cut_and_add(routes,k, contact_pairs, delta_plus, delta_minus):
             used_nodes = used_nodes | set(routes[i])
 
 
-    
+    # Subfunction to recusivly (via DFS) find the shortest route for all a contact pair.
     def graph_search_helper(current_route):
-        #print("test")
+        #find adjecent nodes and remove all that have been seen/used
         nodes_to_search = set(delta_plus[current_route[-1]]) - visited_nodes_this_contact_pair
     
         if not nodes_to_search:
@@ -217,17 +212,17 @@ def heuristic_cut_and_add(routes,k, contact_pairs, delta_plus, delta_minus):
             return best_route
     
 
-
-
+    # For each contact pair (that does not have a path), start the recursive loop with only the initial node
     for i in contact_pairs_without_route:
         visited_nodes_this_contact_pair = used_nodes.copy()
         start_node = tuple(contact_pairs[i][0])
         end_node   = tuple(contact_pairs[i][1])
 
+        # For each unused contact pair find a route (if one exists)
         visited_nodes_this_contact_pair.add(start_node)
         possible_route = graph_search_helper([start_node])
         
-
+        # If a route is found add it, then repeat.
         if possible_route is not None:
             routes[i] = possible_route
             used_nodes = used_nodes | set(routes[i])
@@ -235,14 +230,76 @@ def heuristic_cut_and_add(routes,k, contact_pairs, delta_plus, delta_minus):
     return routes
 
 
+def h(u, routes):
+    '''
+    Brief: Calculate h(u) given the solution to the Lagrangean subproblems for each l=0..k
+        
+    Parameters: 
+        ArrayLike u : The specific set of dual-vartiables we calculate from
+        list[list[tuples] | None] routes : List of routes found in the subproblem, given the above u 
+
+    Returns:
+        The value of h(u) given the subproblem solution.
+
+    '''
+    
+    subproblem_sum = 0
+    for route_k in routes: # For each k the only x's set to 1 are the ones in the route, all other are zero
+
+        if route_k is None: #If no route for this l exist this term is zero
+            continue
+        
+        subproblem_sum +=  1
+        for vertex_i in route_k:
+            subproblem_sum -= u[vertex_i]*1
+
+
+    return np.sum(u) + subproblem_sum
+
+
+def calculate_subgradient(routes,width,height):
+    '''
+    Brief: Calculate subgradient at step t
+    
+    Parameters: 
+        list[list[tuples] | None] routes : List of routes found in the subproblem, given the above u 
+        int width, height : size of the grid
+
+    Returns:
+        ArrayLike search_direction: A subdirection
+    
+    '''
+    search_direction = np.ones((width, height, 2))
+
+    for route_k in routes: # For each k the only x's set to 1 are the ones in the route, all other are zero
+    
+            if route_k is None: #If no route for this l exist this term is zero
+                continue
+    
+            for vertex_i in route_k:
+                search_direction[vertex_i] -= 1
+
+    return search_direction
+
 
 def update_u(u,routes,width,height,theta,feasible_primal_solution):
     '''
-        Brief: Update u one step using calculate_subgradient() based on Polyak step length with a feasible primal solution
+    Brief: Update u one step using calculate_subgradient() based on Polyak step length with a feasible primal solution
+    
+    Parameters: 
+        ArrayLike u : The specific set of dual-vartiables we calculate from
+        list[list[tuples] | None] routes : List of routes found in the subproblem, given the above u 
+        int width, height : size of the grid
+        float theta : Decresing parameter of 'steplength' in Polyak step-length formula
+        int feasible_primal_solution : A lower bound on h(u) given by a feasable primal solution
+
+    Returns:
+        ArrayLike u_updated: The new u value
+        hu_t : The value of h(u)
     
     '''
 
-    #Find seach direction
+    #Find search direction
     search_direction = calculate_subgradient(routes,width,height)
 
     # Perform projection, if u_i = 0 project search direction onto the positive real line
@@ -269,7 +326,14 @@ def subgradient_algorithm(instance_name, max_iter=1000):
     '''
     Brief: full subgradient algorithm
 
+    Parameters: 
+        string instance_name : What instance do we run it on, give only name not path. The below structure is assumed.
+        int max_iter : How many iterations before automatic termination, default = 1000.
+
+    Returns:
+        algorithm_results : Structure documented in code below
     '''
+    algorithm_results = ()
 
     # Load the PCB we wish to calculate from
     PCB = load_instance("instances/"+instance_name)
@@ -297,9 +361,8 @@ def subgradient_algorithm(instance_name, max_iter=1000):
         routes_t  = cheapest_grid_routes(width, height, u, contact_pairs)
 
         # Using heuristic to find feasible route with corresponding primal solution (number of connected contact pairs)
-        #feasible_routes_t = heuristic_cut_largest_intersection(routes_t,k)
-        feasible_routes_t = heuristic_cut_and_add(routes_t,k,contact_pairs, delta_plus, delta_minus)
-        feasible_primal_solution_t = len([route for route in feasible_routes_t if route is not None])
+        feasible_routes_t = heuristic_cut_and_add(routes_t, k, contact_pairs, delta_plus) #feasible_routes_t = heuristic_cut_largest_intersection(routes_t,k)
+        feasible_primal_solution_t = len([route for route in feasible_routes_t if route is not None]) 
 
         #If we get a better primal solution, update the current best set of solutions
         if feasible_primal_solution_t > best_feasible_primal_solution:
@@ -307,35 +370,70 @@ def subgradient_algorithm(instance_name, max_iter=1000):
             best_feasible_routes          = feasible_routes_t
             best_infeasible_routes        = routes_t
 
-        #Update u
-        u, hu_t = update_u(u,routes_t,width,height,theta,best_feasible_primal_solution)
+        #Update u, note hu_t  is h(u) of the previous u
+        u_new, hu_t = update_u(u,routes_t,width,height,theta,best_feasible_primal_solution)
             
-        #Print progress and decrese theta
+        #decrese theta
         if (t + 1) % 10 == 0:
             theta *= 0.95
-            print(
-                f"Iteration {t}: "
-                f"h(u) = {hu_t:.6f}, "
-                f"hbar = {best_feasible_primal_solution:.6f}"
-            )
 
-            # Duality gap is less than 1, the best feasible primal has been achieved (since it is an integer)
-            if hu_t - best_feasible_primal_solution < 1:
-                break
+        #Print progress
+        if t % 100 == 0:
+            print(instance_name+f"Iteration {t} : h(u) = {hu_t:.6f} : hbar = {best_feasible_primal_solution:.6f}")
 
+        # Duality gap is less than 1, the best feasible primal has been achieved (since it is an integer)
+        duality_gap = hu_t - best_feasible_primal_solution
+        if duality_gap < 1-1e-6:
+            algorithm_results = (t,                                        # Number of iterations
+                                 hu_t,                                     # Value of dual function
+                                 int(best_feasible_primal_solution),       # The best feasable value found by heuristic, that is hbar
+                                 duality_gap,                              # Duality gap, difference of above
+                                 (width,height,best_feasible_routes, u))   # Data needed to use ' plot_grid_routes(width,height,best_feasible_routes,dual_values=u) '
+            break
+
+        #Update u for clarity and then repeat loop
+        u = u_new
+
+        #Failed to converge
+        if t == max_iter-1:
+            algorithm_results = None
         
-        
+    '''   
     plot_grid_routes(width,height,best_feasible_routes,dual_values=u)
     plt.show()
     plot_grid_routes(width,height,best_infeasible_routes,dual_values=u)
     plt.show()
-    return 0
+    '''
+    return algorithm_results
 
+# THE TESTS WE DO:
 iters = 10000
-#subgradient_algorithm("VLSI_8_6_7.json",iters)
-#subgradient_algorithm("VLSI_30_10_15.json",iters)
-subgradient_algorithm("VLSI_30_11_15.json",iters)
-#subgradient_algorithm("VLSI_30_10_15.json",iters)
-#subgradient_algorithm("VLSI_30_10_15.json",iters)
+instance_names = ["VLSI_8_6_7.json",
+                  "VLSI_30_10_15.json",
+                  "VLSI_30_11_15.json",
+                  "VLSI_35_12_18.json",
+                  "VLSI_35_13_17.json",
+                  "VLSI_35_14_16.json"]
+
+printed_strings = []
+plotting_data  = []
+for instance_name in instance_names:
+    algorithm_results = subgradient_algorithm(instance_name,iters)
+    iterations_inst    = algorithm_results[0]
+    hu_inst            = algorithm_results[1]
+    hbar_inst          = algorithm_results[2]
+    duality_gap_inst   = algorithm_results[3]
+    plotting_data.append(algorithm_results[4])
+
+    printed_strings.append(instance_name+f" completed in {iterations_inst} iterations, h(u)={hu_inst}, hbar={hbar_inst} giving duality gap {duality_gap_inst}")
+
+print("")
+for string_t in printed_strings:
+    print(string_t)
+
+for data in plotting_data:
+    plot_grid_routes(data[0],data[1],data[2],dual_values=data[3])
+    plt.show()
+
 
 

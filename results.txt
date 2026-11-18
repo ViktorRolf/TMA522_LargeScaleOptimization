@@ -1,0 +1,6 @@
+VLSI_8_6_7.json    completed in 122  iterations, h(u)=6.9967730243600705, hbar=6  giving duality gap 0.9967730243600705
+VLSI_30_10_15.json completed in 2263 iterations, h(u)=14.686762848622866, hbar=14 giving duality gap 0.6867628486228661
+VLSI_30_11_15.json completed in 2375 iterations, h(u)=15.002325501118097, hbar=15 giving duality gap 0.0023255011180971508
+VLSI_35_12_18.json completed in 4685 iterations, h(u)=17.84075057045567,  hbar=17 giving duality gap 0.8407505704556684
+VLSI_35_13_17.json completed in 2603 iterations, h(u)=17.003788242932515, hbar=17 giving duality gap 0.003788242932515118
+VLSI_35_14_16.json completed in 2420 iterations, h(u)=16.0044614936741,   hbar=16 giving duality gap 0.00446149367409987

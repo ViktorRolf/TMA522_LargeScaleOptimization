@@ -4,6 +4,7 @@ from provided_functions import cheapest_grid_routes
 from provided_functions import plot_grid_routes
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 
 def calc_delta(PCB: RoutingInstance):
@@ -322,18 +323,25 @@ def update_u(u,routes,width,height,theta,feasible_primal_solution):
     return u_updated, hu_t
     
 
-def subgradient_algorithm(instance_name, max_iter=1000):
+def subgradient_algorithm(instance_name, max_iter=1000, save_all_hdata = False, timing_iterations=False):
     '''
     Brief: full subgradient algorithm
 
     Parameters: 
         string instance_name : What instance do we run it on, give only name not path. The below structure is assumed.
         int max_iter : How many iterations before automatic termination, default = 1000.
+        bool save_all_hdata : If we keep all data for hbar and h(u), for plot construction then return this data. 
+        bool timing_iterations : Time iterations and print an average (per iter) compute time.
 
     Returns:
         algorithm_results : Structure documented in code below
     '''
+    # Storage for results
     algorithm_results = ()
+    if save_all_hdata:
+        hdata=([],[],[])
+    else:
+        hdata = None
 
     # Load the PCB we wish to calculate from
     PCB = load_instance("instances/"+instance_name)
@@ -355,6 +363,11 @@ def subgradient_algorithm(instance_name, max_iter=1000):
     best_feasible_routes   = []
     best_infeasible_routes = []
 
+    #if timing, set start time
+    if timing_iterations==True:
+        start_time = time.perf_counter()
+
+
     # Main loop over some max iterations
     for t in range(max_iter):
         #Find routes using given mathod
@@ -372,7 +385,7 @@ def subgradient_algorithm(instance_name, max_iter=1000):
 
         #Update u, note hu_t  is h(u) of the previous u
         u_new, hu_t = update_u(u,routes_t,width,height,theta,best_feasible_primal_solution)
-            
+        
         #decrese theta
         if (t + 1) % 10 == 0:
             theta *= 0.95
@@ -381,6 +394,12 @@ def subgradient_algorithm(instance_name, max_iter=1000):
         if t % 100 == 0:
             print(instance_name+f"Iteration {t} : h(u) = {hu_t:.6f} : hbar = {best_feasible_primal_solution:.6f}")
 
+        #saving hdata
+        if save_all_hdata:
+            hdata[0].append(best_feasible_primal_solution) #hbar
+            hdata[1].append(hu_t)                          #hu
+            hdata[2].append(t)                             #iteration
+
         # Duality gap is less than 1, the best feasible primal has been achieved (since it is an integer)
         duality_gap = hu_t - best_feasible_primal_solution
         if duality_gap < 1-1e-6:
@@ -388,7 +407,8 @@ def subgradient_algorithm(instance_name, max_iter=1000):
                                  hu_t,                                     # Value of dual function
                                  int(best_feasible_primal_solution),       # The best feasable value found by heuristic, that is hbar
                                  duality_gap,                              # Duality gap, difference of above
-                                 (width,height,best_feasible_routes, u))   # Data needed to use ' plot_grid_routes(width,height,best_feasible_routes,dual_values=u) '
+                                 (width,height,best_feasible_routes, u),   # Data needed to use ' plot_grid_routes(width,height,best_feasible_routes,dual_values=u) '
+                                 hdata)
             break
 
         #Update u for clarity and then repeat loop
@@ -404,6 +424,14 @@ def subgradient_algorithm(instance_name, max_iter=1000):
     plot_grid_routes(width,height,best_infeasible_routes,dual_values=u)
     plt.show()
     '''
+
+    #if timing, set end time
+    if timing_iterations==True:
+        end_time = time.perf_counter()
+        per_iteration_time = round((end_time - start_time) * 1e3/t,5)
+        print("Execution time (per iteration):",per_iteration_time  , "milliseconds")
+        print("")
+
     return algorithm_results
 
 # THE TESTS WE DO:
@@ -416,24 +444,69 @@ instance_names = ["VLSI_8_6_7.json",
                   "VLSI_35_14_16.json"]
 
 printed_strings = []
-plotting_data  = []
+plotting_data   = []
+h_data          = []
+
 for instance_name in instance_names:
-    algorithm_results = subgradient_algorithm(instance_name,iters)
+    algorithm_results = subgradient_algorithm(instance_name,iters,True)
     iterations_inst    = algorithm_results[0]
     hu_inst            = algorithm_results[1]
     hbar_inst          = algorithm_results[2]
     duality_gap_inst   = algorithm_results[3]
+
     plotting_data.append(algorithm_results[4])
+    h_data.append(algorithm_results[5])
 
     printed_strings.append(instance_name+f" completed in {iterations_inst} iterations, h(u)={hu_inst}, hbar={hbar_inst} giving duality gap {duality_gap_inst}")
 
+# Print the results
 print("")
 for string_t in printed_strings:
     print(string_t)
 
+#plot convergence
+fig, axs = plt.subplots(2, 3, figsize=(15, 9), sharex=False, sharey=True)
+axs = axs.flatten()
+
+colors = ['red', 'blue', 'orange', 'green', 'purple', 'yellow']
+
+for k in range(len(instance_names)):
+    ax = axs[k]
+
+    hbar       = h_data[k][0]
+    hu         = h_data[k][1]
+    iterations = h_data[k][2]
+
+    ax.plot(iterations, hu, color=colors[k], label=r'$h(u)$')
+    ax.plot(iterations, hbar, '--', color=colors[k], label=r'$\bar{h}$')
+    ax.axvline(x=iterations[-1], color=colors[k],
+               linestyle=':', linewidth=2, alpha=0.8)
+
+    ax.set_title(instance_names[k])
+    ax.set_xlabel("Iterations")
+    ax.set_ylabel("h-values")
+    ax.legend()
+
+fig.suptitle(
+    "Convergence of all instances\n"
+    r"$h(u)$ as solid line and $\bar{h}$ as dashed line",
+    fontsize=14
+)
+
+plt.tight_layout(rect=[0, 0, 1, 0.93])
+plt.show()
+
+
+
+# plot all wiring
 for data in plotting_data:
     plot_grid_routes(data[0],data[1],data[2],dual_values=data[3])
     plt.show()
 
 
+#print iterations times
+print("")
+for instance_name in instance_names:
+    print(instance_name+" (timing): ")
+    subgradient_algorithm(instance_name,iters,save_all_hdata=False,timing_iterations=True)
 
